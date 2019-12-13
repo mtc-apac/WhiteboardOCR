@@ -1,0 +1,229 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "teams_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "teams"
+    },
+    "teams_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": ""
+    },
+    "teams_1_token:TenantId": {
+      "type": "string",
+      "metadata": {
+        "description": "The tenant ID of for the Azure Active Directory application"
+      }
+    },
+    "servicebus_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "servicebus"
+    },
+    "servicebus_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "raztype_servicebus_connection"
+    },
+    "servicebus_1_connectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure Service Bus Connection String"
+      }
+    },
+    "LogicAppLocation": {
+      "type": "string",
+      "minLength": 1,
+      "allowedValues": [
+        "[resourceGroup().location]",
+        "eastasia",
+        "southeastasia",
+        "centralus",
+        "eastus",
+        "eastus2",
+        "westus",
+        "northcentralus",
+        "southcentralus",
+        "northeurope",
+        "westeurope",
+        "japanwest",
+        "japaneast",
+        "brazilsouth",
+        "australiaeast",
+        "australiasoutheast",
+        "southindia",
+        "centralindia",
+        "westindia",
+        "canadacentral",
+        "canadaeast",
+        "uksouth",
+        "ukwest",
+        "westcentralus",
+        "westus2",
+        "koreacentral",
+        "koreasouth",
+        "francecentral",
+        "francesouth",
+        "southafricanorth",
+        "southafricawest"
+      ],
+      "defaultValue": "southeastasia"
+    },
+    "LogicAppName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "raz-ocr-teams-logic"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Parse_JSON": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@base64ToString(triggerBody()?['ContentData'])",
+                "schema": {
+                  "properties": {
+                    "CreatedDateTime": {
+                      "type": "string"
+                    },
+                    "ImageURL": {
+                      "type": "string"
+                    },
+                    "Name": {
+                      "type": "string"
+                    },
+                    "Text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "runAfter": {}
+            },
+            "Post_your_own_adaptive_card_as_the_Flow_bot_to_a_channel": {
+              "runAfter": {
+                "Parse_JSON": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "body": {
+                  "messageBody": "{\n    \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n    \"type\": \"AdaptiveCard\",\n    \"version\": \"1.0\",\n    \"body\": [      \n        {\n            \"type\": \"TextBlock\",\n            \"text\": \"**@{body('Parse_JSON')?['Name']}**\"\n        },\n        {\n            \"type\": \"TextBlock\",\n            \"text\": \"[Image here](@{body('Parse_JSON')?['ImageURL']})\"\n        },\n        {\n            \"type\": \"ColumnSet\",\n            \"columns\": [\n              {\n                \"type\": \"Column\",\n                \"width\": \"100\",\n                \"items\": [\n                  {\n                    \"type\": \"Image\",\n                    \"url\": \"@{body('Parse_JSON')?['ImageURL']}\",\n                    \"size\": \"stretch\"\n                  }\n                ]\n              },\n              {\n                \"type\": \"Column\",\n                \"width\": \"100\",\n                \"items\": [\n                  {\n                    \"type\": \"TextBlock\",\n                    \"text\": \"@{replace(replace(body('Parse_JSON')?['Text'],'\\','\\\\'),'\"','\\\"')}\",\n                    \"wrap\": true\n                  }\n                ]\n              }\n            ]\n        }\n    ]\n}",
+                  "recipient": {
+                    "channelId": "19:af92a585bba241ffa7bdfc2c18c537b8@thread.skype"
+                  }
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['teams']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/flowbot/actions/adaptivecard/recipienttypes/channel",
+                "queries": {
+                  "groupId": "84bf731c-9f2b-419c-8a03-deb4300c9617"
+                }
+              }
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "When_one_or_more_messages_arrive_in_a_topic_(auto-complete)": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/@{encodeURIComponent(encodeURIComponent('ocr'))}/subscriptions/@{encodeURIComponent('teams')}/messages/batch/head",
+                "queries": {
+                  "maxMessageCount": 20,
+                  "subscriptionType": "Main"
+                }
+              },
+              "recurrence": {
+                "frequency": "Hour",
+                "interval": 1
+              },
+              "splitOn": "@triggerBody()"
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "teams": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'teams')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('teams_1_Connection_Name'))]",
+                "connectionName": "[parameters('teams_1_Connection_Name')]"
+              },
+              "servicebus": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'servicebus')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]",
+                "connectionName": "[parameters('servicebus_1_Connection_Name')]"
+              }
+            }
+          }
+        }
+      },
+      "name": "[parameters('LogicAppName')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[parameters('LogicAppLocation')]",
+      "tags": {
+        "displayName": "LogicApp"
+      },
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', parameters('teams_1_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[parameters('teams_1_Connection_Name')]",
+      "location": "southeastasia",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'teams')]"
+        },
+        "displayName": "[parameters('teams_1_Connection_DisplayName')]",
+        "nonSecretParameterValues": {
+          "token:TenantId": "[parameters('teams_1_token:TenantId')]"
+        }
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[parameters('servicebus_1_Connection_Name')]",
+      "location": "southeastasia",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'servicebus')]"
+        },
+        "displayName": "[parameters('servicebus_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "connectionString": "[parameters('servicebus_1_connectionString')]"
+        }
+      }
+    }
+  ],
+  "outputs": {}
+}

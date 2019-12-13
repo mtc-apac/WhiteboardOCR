@@ -1,0 +1,373 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "servicebus_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "servicebus"
+    },
+    "servicebus_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "raztype_servicebus_connection"
+    },
+    "servicebus_1_connectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure Service Bus Connection String"
+      }
+    },
+    "LogicAppLocation": {
+      "type": "string",
+      "minLength": 1,
+      "allowedValues": [
+        "[resourceGroup().location]",
+        "eastasia",
+        "southeastasia",
+        "centralus",
+        "eastus",
+        "eastus2",
+        "westus",
+        "northcentralus",
+        "southcentralus",
+        "northeurope",
+        "westeurope",
+        "japanwest",
+        "japaneast",
+        "brazilsouth",
+        "australiaeast",
+        "australiasoutheast",
+        "southindia",
+        "centralindia",
+        "westindia",
+        "canadacentral",
+        "canadaeast",
+        "uksouth",
+        "ukwest",
+        "westcentralus",
+        "westus2",
+        "koreacentral",
+        "koreasouth",
+        "francecentral",
+        "francesouth",
+        "southafricanorth",
+        "southafricawest"
+      ],
+      "defaultValue": "southeastasia"
+    },
+    "LogicAppName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "raz-ocr-logic"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Condition": {
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "greaterOrEquals": [
+                      "@outputs('HTTP_POST_-_Cognitive_Services_-_RecognizeText')['statusCode']",
+                      200
+                    ]
+                  },
+                  {
+                    "less": [
+                      "@outputs('HTTP_POST_-_Cognitive_Services_-_RecognizeText')['statusCode']",
+                      300
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Condition_2": {
+                  "type": "If",
+                  "expression": {
+                    "and": [
+                      {
+                        "equals": [
+                          "@empty(body('ParseRecognizeTextJsonResponse'))",
+                          "@true"
+                        ]
+                      }
+                    ]
+                  },
+                  "actions": {},
+                  "runAfter": {
+                    "ParseRecognizeTextJsonResponse": [
+                      "Succeeded"
+                    ]
+                  },
+                  "else": {
+                    "actions": {
+                      "Compose": {
+                        "type": "Compose",
+                        "inputs": "@replace(replace(body('ParseRecognizeTextJsonResponse'),'\\','\\\\'),'\"','\\\"')",
+                        "runAfter": {}
+                      },
+                      "Send_message": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                          "host": {
+                            "connection": {
+                              "name": "@parameters('$connections')['servicebus']['connectionId']"
+                            }
+                          },
+                          "method": "post",
+                          "body": {
+                            "ContentData": "@{base64(concat('{','\n','  \"CreatedDateTime\": \"',triggerBody()?['CreatedDateTime'],'\",','\n','  \"ImageURL\": \"',triggerBody()?['URL'],'\",','\n','  \"Name\": \"',triggerBody()?['Name'],'\",','\n','  \"Text\": \"',outputs('Compose'),'\"','\n','}'))}",
+                            "ContentType": "application/json"
+                          },
+                          "path": "/@{encodeURIComponent(encodeURIComponent('ocr'))}/messages",
+                          "queries": {
+                            "systemProperties": "None"
+                          }
+                        },
+                        "runAfter": {
+                          "Compose": [
+                            "Succeeded"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "Delay": {
+                  "type": "Wait",
+                  "inputs": {
+                    "interval": {
+                      "count": 10,
+                      "unit": "Second"
+                    }
+                  },
+                  "runAfter": {
+                    "Parse_JSON": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "HTTP_GET_-_RecognizeText_-_Operation-Location": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "GET",
+                    "uri": "@body('Parse_JSON')?['Operation-Location']",
+                    "headers": {
+                      "Ocp-Apim-Subscription-Key": "@{body('HTTP_GET_-_Key_Vault_-_razcomputervision_secret')?['value']}"
+                    }
+                  },
+                  "runAfter": {
+                    "Delay": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "ParseRecognizeTextJsonResponse": {
+                  "type": "Function",
+                  "inputs": {
+                    "body": "@body('HTTP_GET_-_RecognizeText_-_Operation-Location')",
+                    "method": "POST",
+                    "headers": {
+                      "Content-Type": "application/json"
+                    },
+                    "queries": {
+                      "name": "@{triggerBody()?['Name']}"
+                    },
+                    "function": {
+                      "id": "/subscriptions/50fb2758-5add-47ee-b8f2-9c9ae596fed5/resourceGroups/raz-common-rg/providers/Microsoft.Web/sites/raznetfunctions/functions/ParseRecognizeTextJsonResponse"
+                    }
+                  },
+                  "runAfter": {
+                    "HTTP_GET_-_RecognizeText_-_Operation-Location": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "Parse_JSON": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@outputs('HTTP_POST_-_Cognitive_Services_-_RecognizeText')['headers']",
+                    "schema": {
+                      "properties": {
+                        "Cache-Control": {
+                          "type": "string"
+                        },
+                        "Content-Length": {
+                          "type": "string"
+                        },
+                        "Date": {
+                          "type": "string"
+                        },
+                        "Expires": {
+                          "type": "string"
+                        },
+                        "Operation-Location": {
+                          "type": "string"
+                        },
+                        "Pragma": {
+                          "type": "string"
+                        },
+                        "Strict-Transport-Security": {
+                          "type": "string"
+                        },
+                        "X-AspNet-Version": {
+                          "type": "string"
+                        },
+                        "X-Powered-By": {
+                          "type": "string"
+                        },
+                        "apim-request-id": {
+                          "type": "string"
+                        },
+                        "x-content-type-options": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "runAfter": {}
+                }
+              },
+              "runAfter": {
+                "HTTP_POST_-_Cognitive_Services_-_RecognizeText": [
+                  "Succeeded",
+                  "Failed",
+                  "Skipped",
+                  "TimedOut"
+                ]
+              }
+            },
+            "HTTP_GET_-_Key_Vault_-_razcomputervision_secret": {
+              "type": "Http",
+              "inputs": {
+                "method": "GET",
+                "uri": "https://razkeyvault.vault.azure.net/secrets/razcomputervision",
+                "queries": {
+                  "api-version": "2016-10-01"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://vault.azure.net"
+                }
+              },
+              "runAfter": {}
+            },
+            "HTTP_POST_-_Cognitive_Services_-_RecognizeText": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "https://southeastasia.api.cognitive.microsoft.com/vision/v2.0/recognizeText",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "Ocp-Apim-Subscription-Key": "@{body('HTTP_GET_-_Key_Vault_-_razcomputervision_secret')?['value']}"
+                },
+                "queries": {
+                  "mode": "Handwritten"
+                },
+                "body": {
+                  "url": "@{triggerBody()?['URL']}"
+                }
+              },
+              "runAfter": {
+                "HTTP_GET_-_Key_Vault_-_razcomputervision_secret": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Response": {
+              "type": "Response",
+              "kind": "Http",
+              "inputs": {
+                "statusCode": 200
+              },
+              "runAfter": {
+                "Condition": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "manual": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "schema": {
+                  "properties": {
+                    "CreatedDateTime": {
+                      "type": "string"
+                    },
+                    "Name": {
+                      "type": "string"
+                    },
+                    "URL": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "servicebus": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', parameters('LogicAppLocation'), '/managedApis/', 'servicebus')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]",
+                "connectionName": "[parameters('servicebus_1_Connection_Name')]"
+              }
+            }
+          }
+        }
+      },
+      "name": "[parameters('LogicAppName')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[parameters('LogicAppLocation')]",
+      "tags": {
+        "displayName": "LogicApp"
+      },
+      "identity": {
+        "type": "SystemAssigned",
+        "principalId": "451bb024-73a0-4f9a-9e9d-d3dc762bdec1",
+        "tenantId": "295be6d3-5142-4f3a-947b-6f07630a6456"
+      },
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[parameters('servicebus_1_Connection_Name')]",
+      "location": "southeastasia",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'servicebus')]"
+        },
+        "displayName": "[parameters('servicebus_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "connectionString": "[parameters('servicebus_1_connectionString')]"
+        }
+      }
+    }
+  ],
+  "outputs": {}
+}

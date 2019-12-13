@@ -1,0 +1,236 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "servicebus_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "servicebus"
+    },
+    "servicebus_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "raztype_servicebus_connection"
+    },
+    "servicebus_1_connectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure Service Bus Connection String"
+      }
+    },
+    "onenote_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "onenote"
+    },
+    "onenote_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "rauy@microsoft.com"
+    },
+    "LogicAppLocation": {
+      "type": "string",
+      "minLength": 1,
+      "allowedValues": [
+        "[resourceGroup().location]",
+        "eastasia",
+        "southeastasia",
+        "centralus",
+        "eastus",
+        "eastus2",
+        "westus",
+        "northcentralus",
+        "southcentralus",
+        "northeurope",
+        "westeurope",
+        "japanwest",
+        "japaneast",
+        "brazilsouth",
+        "australiaeast",
+        "australiasoutheast",
+        "southindia",
+        "centralindia",
+        "westindia",
+        "canadacentral",
+        "canadaeast",
+        "uksouth",
+        "ukwest",
+        "westcentralus",
+        "westus2",
+        "koreacentral",
+        "koreasouth",
+        "francecentral",
+        "francesouth",
+        "southafricanorth",
+        "southafricawest"
+      ],
+      "defaultValue": "southeastasia"
+    },
+    "LogicAppName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "raz-ocr-onenote-logic"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "ConvertMarkdownTextToOneNoteHtml": {
+              "type": "Function",
+              "inputs": {
+                "body": "@body('Parse_JSON')?['Text']",
+                "method": "POST",
+                "headers": {
+                  "Content-Type": "text/plain"
+                },
+                "queries": {
+                  "CreatedDateTime": "@{body('Parse_JSON')?['CreatedDateTime']}",
+                  "ImageURL": "@{body('Parse_JSON')?['ImageURL']}"
+                },
+                "function": {
+                  "id": "/subscriptions/50fb2758-5add-47ee-b8f2-9c9ae596fed5/resourceGroups/raz-common-rg/providers/Microsoft.Web/sites/raznetfunctions/functions/ConvertMarkdownTextToOneNoteHtml"
+                }
+              },
+              "runAfter": {
+                "Parse_JSON": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Create_page_in_a_section": {
+              "runAfter": {
+                "ConvertMarkdownTextToOneNoteHtml": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "body": "@{body('ConvertMarkdownTextToOneNoteHtml')}",
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['onenote']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/sections/Dynamic/pages",
+                "queries": {
+                  "notebookKey": "Rafferty @ Microsoft|$|https://microsoftapc-my.sharepoint.com/personal/rauy_microsoft_com/Documents/Rafferty @ Microsoft",
+                  "sectionId": "https://www.onenote.com/api/v1.0/myOrganization/siteCollections/c208be14-c15d-4c2b-ac68-142d5269a2c9/sites/a133a548-e027-4e43-9459-28608d2ee95f/notes/sections/1-976ea063-e188-45dc-9be9-b3d5504d18a3/pages"
+                }
+              }
+            },
+            "Parse_JSON": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@base64ToString(triggerBody()?['ContentData'])",
+                "schema": {
+                  "properties": {
+                    "CreatedDateTime": {
+                      "type": "string"
+                    },
+                    "ImageURL": {
+                      "type": "string"
+                    },
+                    "Name": {
+                      "type": "string"
+                    },
+                    "Text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "When_a_message_is_received_in_a_topic_subscription_(auto-complete)": {
+              "recurrence": {
+                "frequency": "Hour",
+                "interval": 1
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/@{encodeURIComponent(encodeURIComponent('ocr'))}/subscriptions/@{encodeURIComponent('onenote')}/messages/head",
+                "queries": {
+                  "subscriptionType": "Main"
+                }
+              }
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "onenote": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'onenote')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('onenote_1_Connection_Name'))]",
+                "connectionName": "[parameters('onenote_1_Connection_Name')]"
+              },
+              "servicebus": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'servicebus')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]",
+                "connectionName": "[parameters('servicebus_1_Connection_Name')]"
+              }
+            }
+          }
+        }
+      },
+      "name": "[parameters('LogicAppName')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[parameters('LogicAppLocation')]",
+      "tags": {
+        "displayName": "LogicApp"
+      },
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', parameters('onenote_1_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[parameters('servicebus_1_Connection_Name')]",
+      "location": "southeastasia",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'servicebus')]"
+        },
+        "displayName": "[parameters('servicebus_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "connectionString": "[parameters('servicebus_1_connectionString')]"
+        }
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[parameters('onenote_1_Connection_Name')]",
+      "location": "southeastasia",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'southeastasia', '/managedApis/', 'onenote')]"
+        },
+        "displayName": "[parameters('onenote_1_Connection_DisplayName')]"
+      }
+    }
+  ],
+  "outputs": {}
+}
